@@ -29,10 +29,12 @@ while [[ $# -gt 0 ]]; do
       ;;
     -h|--help)
       cat <<'EOF'
-Usage: update.sh [--repo owner/repo] [--ref ref] [--dest skills_dir]
+Usage: update.sh [--repo owner/repo] [--ref ref] [--dest skills_dir] [--reset-product-pool]
 
 Updates theme-fund-analyzer by running install.sh from the selected GitHub ref.
-The existing installed skill is backed up before replacement.
+The existing installed skill is backed up before replacement. Existing local
+references/product-pools.md is preserved by default; use --reset-product-pool
+to replace it with the repository version.
 EOF
       exit 0
       ;;

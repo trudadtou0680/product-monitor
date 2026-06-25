@@ -60,6 +60,19 @@ curl -fsSL https://raw.githubusercontent.com/trudadtou0680/product-monitor/main/
 theme-fund-analyzer.backup-YYYYMMDDHHMMSS
 ```
 
+默认情况下，更新会保留用户本地维护过的产品池：
+
+```text
+theme-fund-analyzer/references/product-pools.md
+```
+
+如果需要强制恢复仓库默认产品池，可显式传入：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/trudadtou0680/product-monitor/main/update.sh | \
+  bash -s -- --reset-product-pool
+```
+
 ## 使用示例
 
 安装并重启 Codex 后，可以直接提出类似需求：

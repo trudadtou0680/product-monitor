@@ -5,10 +5,11 @@ REPO="trudadtou0680/product-monitor"
 REF="main"
 DEST="${CODEX_HOME:-$HOME/.codex}/skills"
 SKILL_NAME="theme-fund-analyzer"
+PRESERVE_PRODUCT_POOL=1
 
 usage() {
   cat <<'EOF'
-Usage: install.sh [--repo owner/repo] [--ref ref] [--dest skills_dir]
+Usage: install.sh [--repo owner/repo] [--ref ref] [--dest skills_dir] [--reset-product-pool]
 
 Installs theme-fund-analyzer into:
   ${CODEX_HOME:-$HOME/.codex}/skills/theme-fund-analyzer
@@ -17,6 +18,9 @@ Options:
   --repo  GitHub repository, default: trudadtou0680/product-monitor
   --ref   Git ref, branch, or tag, default: main
   --dest  Skills directory, default: ${CODEX_HOME:-$HOME/.codex}/skills
+  --reset-product-pool
+          Replace local references/product-pools.md with the repository version.
+          By default, an existing local product pool is preserved across updates.
   -h, --help
 EOF
 }
@@ -34,6 +38,10 @@ while [[ $# -gt 0 ]]; do
     --dest)
       DEST="${2:?--dest requires a directory}"
       shift 2
+      ;;
+    --reset-product-pool)
+      PRESERVE_PRODUCT_POOL=0
+      shift
       ;;
     -h|--help)
       usage
@@ -103,17 +111,31 @@ if [[ -z "$SOURCE_DIR" ]]; then
 fi
 
 TARGET_DIR="${DEST%/}/${SKILL_NAME}"
+PRODUCT_POOL_RELATIVE_PATH="references/product-pools.md"
 
 mkdir -p "$DEST"
 
+BACKUP_DIR=""
 if [[ -e "$TARGET_DIR" ]]; then
-  BACKUP_DIR="${TARGET_DIR}.backup-$(date +%Y%m%d%H%M%S)"
+  BACKUP_BASE="${TARGET_DIR}.backup-$(date +%Y%m%d%H%M%S)"
+  BACKUP_DIR="$BACKUP_BASE"
+  BACKUP_INDEX=1
+  while [[ -e "$BACKUP_DIR" ]]; do
+    BACKUP_DIR="${BACKUP_BASE}.${BACKUP_INDEX}"
+    BACKUP_INDEX=$((BACKUP_INDEX + 1))
+  done
   echo "Backing up existing skill to $BACKUP_DIR"
   mv "$TARGET_DIR" "$BACKUP_DIR"
 fi
 
 mkdir -p "$TARGET_DIR"
 cp -R "$SOURCE_DIR"/. "$TARGET_DIR"/
+
+if [[ "$PRESERVE_PRODUCT_POOL" -eq 1 && -n "$BACKUP_DIR" && -f "$BACKUP_DIR/$PRODUCT_POOL_RELATIVE_PATH" ]]; then
+  mkdir -p "$TARGET_DIR/$(dirname "$PRODUCT_POOL_RELATIVE_PATH")"
+  cp "$BACKUP_DIR/$PRODUCT_POOL_RELATIVE_PATH" "$TARGET_DIR/$PRODUCT_POOL_RELATIVE_PATH"
+  echo "Preserved local product pool: $TARGET_DIR/$PRODUCT_POOL_RELATIVE_PATH"
+fi
 
 echo "Installed ${SKILL_NAME} to $TARGET_DIR"
 echo "Restart Codex to pick up new skills."

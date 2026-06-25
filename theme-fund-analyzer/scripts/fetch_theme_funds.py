@@ -560,6 +560,135 @@ def load_pool_reference(path: Path) -> dict[str, list[PoolItem]]:
     return {theme: items for theme, items in pools.items() if items}
 
 
+def table_cell(value: str) -> str:
+    return normalize_space(value).replace("|", "｜")
+
+
+def pool_markdown(theme: str, items: list[PoolItem]) -> str:
+    lines = [
+        f"## {normalize_space(theme)}",
+        "",
+        "| 基金代码 | 基金名称 |",
+        "| --- | --- |",
+    ]
+    for item in items:
+        lines.append(f"| {table_cell(item.input_code)} | {table_cell(item.input_name)} |")
+    return "\n".join(lines)
+
+
+def split_table_line(line: str) -> list[str]:
+    return [normalize_space(cell) for cell in line.strip().strip("|").split("|")]
+
+
+def parse_pool_cells(theme: str, cells: list[str], header: list[str] | None, row: int) -> PoolItem | None:
+    if not cells or all(re.fullmatch(r":?-+:?", cell.replace(" ", "")) for cell in cells):
+        return None
+    if any("基金代码" in cell for cell in cells) and any("基金名称" in cell for cell in cells):
+        return None
+    code_idx = -1
+    name_idx = -1
+    if header:
+        code_idx = next((idx for idx, cell in enumerate(header) if "基金代码" in cell or cell.lower() in {"code", "fund code"}), -1)
+        name_idx = next((idx for idx, cell in enumerate(header) if "基金名称" in cell or cell.lower() in {"name", "fund name"}), -1)
+    if code_idx < 0:
+        code_idx = next((idx for idx, cell in enumerate(cells) if re.fullmatch(r"\d{6}|\d+\.0", cell)), -1)
+    if name_idx < 0:
+        name_idx = next(
+            (
+                idx
+                for idx, cell in enumerate(cells)
+                if idx != code_idx and cell and not re.fullmatch(r"\d+|序号|排名", cell)
+            ),
+            -1,
+        )
+    code = code_string(cells[code_idx]) if 0 <= code_idx < len(cells) else ""
+    name = normalize_space(cells[name_idx]) if 0 <= name_idx < len(cells) else ""
+    if not code and not name:
+        return None
+    return PoolItem(theme=theme, input_name=name, input_code=code, row=row)
+
+
+def parse_provided_pool_text(theme: str, text: str) -> list[PoolItem]:
+    items: list[PoolItem] = []
+    header: list[str] | None = None
+    for row, raw_line in enumerate(text.splitlines(), start=1):
+        line = normalize_space(raw_line)
+        if not line or line.startswith("#"):
+            continue
+        if "|" in line:
+            cells = split_table_line(line)
+            if any("基金代码" in cell for cell in cells) and any("基金名称" in cell for cell in cells):
+                header = cells
+                continue
+            item = parse_pool_cells(theme, cells, header, row)
+            if item:
+                items.append(item)
+            continue
+        cleaned = re.sub(r"^\s*(?:[-*+]\s+|\d+[).、]\s*)", "", line)
+        match = re.search(r"(?<!\d)(\d{6})(?!\d)", cleaned)
+        if not match:
+            continue
+        code = code_string(match.group(1))
+        name = normalize_space((cleaned[: match.start()] + " " + cleaned[match.end() :]).strip(" ,，\t-:："))
+        items.append(PoolItem(theme=theme, input_name=name, input_code=code, row=row))
+    return dedupe_input_pool_items(items)
+
+
+def dedupe_input_pool_items(items: list[PoolItem]) -> list[PoolItem]:
+    seen: set[tuple[str, str]] = set()
+    output: list[PoolItem] = []
+    for item in items:
+        key = (code_string(item.input_code), normalize_name(item.input_name))
+        if key in seen:
+            continue
+        seen.add(key)
+        output.append(PoolItem(theme=item.theme, input_name=item.input_name, input_code=code_string(item.input_code), row=len(output) + 1))
+    return output
+
+
+def write_pool_reference(path: Path, theme: str, items: list[PoolItem]) -> None:
+    replacement = pool_markdown(theme, items)
+    if path.exists():
+        lines = path.read_text(encoding="utf-8").splitlines()
+    else:
+        lines = [
+            "# Product Pools",
+            "",
+            "本文件是主题基金产品池事实源。每次用户提供新的产品池时，先在这里覆盖同名主题或新增主题，再运行抓取分析脚本。",
+            "",
+            "表格固定使用 `基金代码`、`基金名称` 两列；基金代码为优先事实源。",
+            "",
+        ]
+    heading_re = re.compile(r"^##\s+(.+?)\s*$")
+    start: int | None = None
+    end = len(lines)
+    for idx, line in enumerate(lines):
+        match = heading_re.match(line)
+        if not match:
+            continue
+        if normalize_space(match.group(1)) == normalize_space(theme):
+            start = idx
+            continue
+        if start is not None and idx > start:
+            end = idx
+            break
+    if start is None:
+        output = lines[:]
+        while output and not output[-1].strip():
+            output.pop()
+        output.extend(["", replacement])
+    else:
+        output = lines[:start] + replacement.splitlines() + lines[end:]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(output).rstrip() + "\n", encoding="utf-8")
+
+
+def read_pool_input(source: str) -> str:
+    if source == "-":
+        return sys.stdin.read()
+    return Path(source).expanduser().read_text(encoding="utf-8")
+
+
 def dedupe_pool_items(items: list[PoolItem]) -> list[PoolItem]:
     groups: dict[str, list[PoolItem]] = {}
     order: list[str] = []
@@ -1179,6 +1308,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--top", type=int, default=30, help="Top N ranked products to display per theme. Use 0 for all.")
     parser.add_argument("--export", type=Path, help="Optional CSV or JSON export path.")
     parser.add_argument("--detailed", action="store_true", help="Show the single selected period plus drawdown instead of the default 1d/1w/1m table.")
+    parser.add_argument("--set-pool", help="Path to a provided product list, or - for stdin. Requires --theme and overwrites/adds that theme before analysis.")
+    parser.add_argument("--update-only", action="store_true", help="Only update the local product pool, then exit. Use with --set-pool.")
     parser.add_argument("--timeout", type=float, default=8.0)
     parser.add_argument("--retries", type=int, default=2)
     parser.add_argument("--max-products", type=int, help="Smoke-test limit per theme.")
@@ -1188,9 +1319,26 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     pool_path = args.pool_reference.expanduser().resolve()
-    if not pool_path.exists():
+    if not pool_path.exists() and not args.set_pool:
         print(f"产品池参考文件不存在：{pool_path}", file=sys.stderr)
         return 2
+    if args.set_pool:
+        if args.theme == "all":
+            print("--set-pool 必须同时提供具体 --theme，不能使用 all", file=sys.stderr)
+            return 2
+        try:
+            pool_text = read_pool_input(args.set_pool)
+        except OSError as exc:
+            print(f"无法读取用户产品清单：{exc}", file=sys.stderr)
+            return 2
+        provided_items = parse_provided_pool_text(args.theme, pool_text)
+        if not provided_items:
+            print("用户产品清单中未解析到有效基金代码或基金名称", file=sys.stderr)
+            return 2
+        write_pool_reference(pool_path, args.theme, provided_items)
+        print(f"已更新产品池：{args.theme}，{len(provided_items)} 只产品，文件：{pool_path}", file=sys.stderr)
+        if args.update_only:
+            return 0
     start = parse_date(args.start) if args.start else None
     end = parse_date(args.end) if args.end else None
     if args.period == "custom" and start is None:
