@@ -29,7 +29,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     -h|--help)
       cat <<'EOF'
-Usage: update.sh [--repo owner/repo] [--ref ref] [--dest skills_dir] [--reset-product-pool]
+Usage: update.sh [--target codex|claude-code|openclaw|agents|generic] [--repo owner/repo] [--ref ref] [--dest skills_dir] [--reset-product-pool]
 
 Updates theme-fund-analyzer by running install.sh from the selected GitHub ref.
 The existing installed skill is backed up before replacement. Existing local

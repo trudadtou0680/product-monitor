@@ -2,7 +2,7 @@
 
 `theme-fund-analyzer` 是一个 Codex skill，用于国内公募基金零售、营销、产品团队围绕主题基金产品池抓取公开数据，计算区间收益率、名单内排名、合并份额规模、最大回撤，并输出可追溯的数据缺口和异常清单。
 
-本仓库面向公开查看和命令行安装。安装完成后需要重启 Codex，新的 skill 才会被识别。
+本仓库面向公开查看和命令行安装。安装完成后需要重启对应 AI 工具，新的 skill 才会被识别。
 
 ## 目录结构
 
@@ -29,7 +29,7 @@ python3 ~/.codex/skills/.system/skill-installer/scripts/install-skill-from-githu
   --path theme-fund-analyzer
 ```
 
-也可以使用本仓库的一键安装脚本：
+也可以使用本仓库的一键安装脚本。默认安装到 Codex：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/trudadtou0680/product-monitor/main/install.sh | bash
@@ -39,6 +39,34 @@ curl -fsSL https://raw.githubusercontent.com/trudadtou0680/product-monitor/main/
 
 ```text
 ${CODEX_HOME:-$HOME/.codex}/skills/theme-fund-analyzer
+```
+
+安装到 Claude Code 用户级 skills：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/trudadtou0680/product-monitor/main/install.sh | \
+  bash -s -- --target claude-code
+```
+
+安装到当前项目的 Claude Code skills：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/trudadtou0680/product-monitor/main/install.sh | \
+  bash -s -- --target generic --dest .claude/skills
+```
+
+安装到 OpenClaw 用户级 skills：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/trudadtou0680/product-monitor/main/install.sh | \
+  bash -s -- --target openclaw
+```
+
+安装到通用 AI 工具 skills 目录：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/trudadtou0680/product-monitor/main/install.sh | \
+  bash -s -- --target generic --dest /path/to/skills
 ```
 
 指定分支、标签或安装目录：
@@ -52,6 +80,16 @@ curl -fsSL https://raw.githubusercontent.com/trudadtou0680/product-monitor/main/
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/trudadtou0680/product-monitor/main/update.sh | bash
+```
+
+更新 Claude Code 或 OpenClaw 时使用相同的 `--target`：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/trudadtou0680/product-monitor/main/update.sh | \
+  bash -s -- --target claude-code
+
+curl -fsSL https://raw.githubusercontent.com/trudadtou0680/product-monitor/main/update.sh | \
+  bash -s -- --target openclaw
 ```
 
 `install.sh` 和 `update.sh` 在覆盖已有 skill 前，会先备份旧目录到同级目录：

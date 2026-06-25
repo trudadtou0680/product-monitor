@@ -3,21 +3,27 @@ set -euo pipefail
 
 REPO="trudadtou0680/product-monitor"
 REF="main"
-DEST="${CODEX_HOME:-$HOME/.codex}/skills"
+TARGET="codex"
+DEST=""
 SKILL_NAME="theme-fund-analyzer"
 PRESERVE_PRODUCT_POOL=1
 
 usage() {
   cat <<'EOF'
-Usage: install.sh [--repo owner/repo] [--ref ref] [--dest skills_dir] [--reset-product-pool]
+Usage: install.sh [--target codex|claude-code|openclaw|agents|generic] [--repo owner/repo] [--ref ref] [--dest skills_dir] [--reset-product-pool]
 
-Installs theme-fund-analyzer into:
-  ${CODEX_HOME:-$HOME/.codex}/skills/theme-fund-analyzer
+Installs theme-fund-analyzer into the selected AI tool's skills directory.
 
 Options:
+  --target
+          codex       ${CODEX_HOME:-$HOME/.codex}/skills
+          claude-code ${CLAUDE_HOME:-$HOME/.claude}/skills
+          openclaw    ${OPENCLAW_HOME:-$HOME/.openclaw}/skills
+          agents      ${AGENTS_HOME:-$HOME/.agents}/skills
+          generic     requires --dest
   --repo  GitHub repository, default: trudadtou0680/product-monitor
   --ref   Git ref, branch, or tag, default: main
-  --dest  Skills directory, default: ${CODEX_HOME:-$HOME/.codex}/skills
+  --dest  Override skills directory. Examples: .claude/skills, ~/.openclaw/skills
   --reset-product-pool
           Replace local references/product-pools.md with the repository version.
           By default, an existing local product pool is preserved across updates.
@@ -27,6 +33,10 @@ EOF
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --target)
+      TARGET="${2:?--target requires a value}"
+      shift 2
+      ;;
     --repo)
       REPO="${2:?--repo requires owner/repo}"
       shift 2
@@ -58,6 +68,32 @@ done
 if [[ "$REPO" != */* ]]; then
   echo "--repo must use owner/repo format: $REPO" >&2
   exit 2
+fi
+
+if [[ -z "$DEST" ]]; then
+  case "$TARGET" in
+    codex)
+      DEST="${CODEX_HOME:-$HOME/.codex}/skills"
+      ;;
+    claude-code)
+      DEST="${CLAUDE_HOME:-$HOME/.claude}/skills"
+      ;;
+    openclaw)
+      DEST="${OPENCLAW_HOME:-$HOME/.openclaw}/skills"
+      ;;
+    agents)
+      DEST="${AGENTS_HOME:-$HOME/.agents}/skills"
+      ;;
+    generic)
+      echo "--target generic requires --dest <skills_dir>" >&2
+      exit 2
+      ;;
+    *)
+      echo "Unsupported --target: $TARGET" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
 fi
 
 require_command() {
@@ -138,4 +174,4 @@ if [[ "$PRESERVE_PRODUCT_POOL" -eq 1 && -n "$BACKUP_DIR" && -f "$BACKUP_DIR/$PRO
 fi
 
 echo "Installed ${SKILL_NAME} to $TARGET_DIR"
-echo "Restart Codex to pick up new skills."
+echo "Restart the target AI tool to pick up new skills."
