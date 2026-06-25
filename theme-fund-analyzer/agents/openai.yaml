@@ -1,0 +1,4 @@
+interface:
+  display_name: "Theme Fund Analyzer"
+  short_description: "主题基金公开数据抓取、排名与规模回撤分析"
+  default_prompt: "Use $theme-fund-analyzer to rank CPO funds by recent 1-month return and show size, drawdown, and data gaps."
