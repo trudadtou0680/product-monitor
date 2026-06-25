@@ -2,7 +2,7 @@
 
 `theme-fund-analyzer` 是一个 Codex skill，用于国内公募基金零售、营销、产品团队围绕主题基金产品池抓取公开数据，计算区间收益率、名单内排名、合并份额规模、最大回撤，并输出可追溯的数据缺口和异常清单。
 
-本仓库面向公开查看和命令行安装。安装完成后需要重启对应 AI 工具，新的 skill 才会被识别。
+本仓库面向公开查看和命令行安装。
 
 ## 目录结构
 
@@ -113,7 +113,7 @@ curl -fsSL https://raw.githubusercontent.com/trudadtou0680/product-monitor/main/
 
 ## 使用示例
 
-安装并重启 Codex 后，可以直接提出类似需求：
+安装后，可以直接提出类似需求：
 
 ```text
 Use $theme-fund-analyzer to rank CPO funds by recent 1-month return and show size, drawdown, and data gaps.

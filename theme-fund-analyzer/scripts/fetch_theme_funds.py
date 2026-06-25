@@ -1227,6 +1227,25 @@ def latest_day_header(results_by_theme: dict[str, list[ProductResult]]) -> str:
     return "近1日/排名"
 
 
+def is_southern_fund(result: ProductResult) -> bool:
+    names = [result.fund_name, result.analysis_name, result.input_name]
+    return any("南方" in normalize_space(name) for name in names if name)
+
+
+def markdown_table(results: list[ProductResult], headers: list[str]) -> None:
+    print("| " + " | ".join(headers) + " |")
+    print("| " + " | ".join(["---"] * len(headers)) + " |")
+    for result in results:
+        row = row_dict(result)
+        values = []
+        for header in headers:
+            if header.startswith("近1日("):
+                values.append(row["近1日/排名"])
+            else:
+                values.append(row[header])
+        print("| " + " | ".join(values) + " |")
+
+
 def print_markdown(
     results_by_theme: dict[str, list[ProductResult]],
     period: str,
@@ -1246,22 +1265,17 @@ def print_markdown(
         display = ranked[:top] if top else ranked
         gaps = [r for r in results if r.rank is None or r.issues or r.conflict]
         print(f"## {theme}")
+        if detailed:
+            headers = ["排名", "基金代码", "基金名称", "合并份额规模(亿元)", "区间收益率/排名", "最大回撤/排名", "规模截止日", "异常标记"]
+        else:
+            headers = ["排名", "基金代码", "基金名称", "合并份额规模(亿元)", latest_day_header({theme: results}), "近1周/排名", "近1月/排名", "异常标记"]
+        southern = [r for r in ranked if is_southern_fund(r)]
+        if southern:
+            print("\n### 南方基金产品（置顶，排名为板块内实际排名）")
+            markdown_table(southern, headers)
         if display:
-            if detailed:
-                headers = ["排名", "基金代码", "基金名称", "合并份额规模(亿元)", "区间收益率/排名", "最大回撤/排名", "规模截止日", "异常标记"]
-            else:
-                headers = ["排名", "基金代码", "基金名称", "合并份额规模(亿元)", latest_day_header({theme: results}), "近1周/排名", "近1月/排名", "异常标记"]
-            print("| " + " | ".join(headers) + " |")
-            print("| " + " | ".join(["---"] * len(headers)) + " |")
-            for result in display:
-                row = row_dict(result)
-                values = []
-                for header in headers:
-                    if header.startswith("近1日("):
-                        values.append(row["近1日/排名"])
-                    else:
-                        values.append(row[header])
-                print("| " + " | ".join(values) + " |")
+            print("\n### 板块排名")
+            markdown_table(display, headers)
         else:
             print("无可排名产品。")
         if gaps:
