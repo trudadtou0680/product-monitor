@@ -14,6 +14,7 @@ import sys
 import time
 import urllib.parse
 import urllib.request
+import urllib.error
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -21,10 +22,7 @@ from typing import Any
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 DEFAULT_POOL_REFERENCE = BASE_DIR / "references" / "product-pools.md"
-USER_AGENT = (
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
-)
+DEFAULT_USER_AGENT = "theme-fund-analyzer/1.0 (+https://github.com/trudadtou0680/product-monitor)"
 MOBILE_PARAMS = {
     "appType": "ttjj",
     "product": "EFund",
@@ -47,6 +45,13 @@ class PoolItem:
     input_name: str
     input_code: str
     row: int
+
+
+@dataclass
+class PoolParseResult:
+    items: list[PoolItem] = field(default_factory=list)
+    name_only: list[PoolItem] = field(default_factory=list)
+    skipped: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -131,11 +136,25 @@ class ProductResult:
 
 
 class Fetcher:
-    def __init__(self, timeout: float = 8.0, retries: int = 2, sleep: float = 0.15):
+    def __init__(
+        self,
+        timeout: float = 8.0,
+        retries: int = 2,
+        sleep: float = 0.15,
+        *,
+        tls_mode: str = "auto",
+        user_agent: str = DEFAULT_USER_AGENT,
+        referer: str = "",
+    ):
         self.timeout = timeout
         self.retries = retries
         self.sleep = sleep
-        self.ctx = ssl._create_unverified_context()
+        self.tls_mode = tls_mode
+        self.ctx = ssl._create_unverified_context() if tls_mode == "insecure" else ssl.create_default_context()
+        self.tls_fallback_used = tls_mode == "insecure"
+        self.tls_warning_printed = False
+        self.user_agent = user_agent
+        self.referer = referer
         self.search_cache: dict[str, list[Candidate]] = {}
         self.catalog_cache: list[Candidate] | None = None
         self.catalog_key_cache: list[tuple[str, Candidate]] | None = None
@@ -149,7 +168,10 @@ class Fetcher:
         self.board_theme_fund_cache: dict[str, list[PoolItem]] = {}
 
     def get_text(self, url: str, *, encoding: str = "utf-8") -> str:
-        req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Referer": "https://fund.eastmoney.com/"})
+        headers = {"User-Agent": self.user_agent}
+        if self.referer:
+            headers["Referer"] = self.referer
+        req = urllib.request.Request(url, headers=headers)
         last_error: Exception | None = None
         for attempt in range(self.retries + 1):
             try:
@@ -159,10 +181,31 @@ class Fetcher:
                     time.sleep(self.sleep)
                 return raw.decode(encoding, errors="ignore")
             except Exception as exc:  # noqa: BLE001 - external endpoint failures are surfaced as data gaps
+                if self.should_retry_without_tls_verification(exc):
+                    self.ctx = ssl._create_unverified_context()
+                    self.tls_fallback_used = True
+                    if not self.tls_warning_printed:
+                        print(
+                            "警告：HTTPS 证书校验失败，已按 --tls-mode auto 自动降级继续抓取；"
+                            "如需强制校验请使用 --tls-mode verify。",
+                            file=sys.stderr,
+                        )
+                        self.tls_warning_printed = True
+                    return self.get_text(url, encoding=encoding)
                 last_error = exc
                 if attempt < self.retries:
                     time.sleep(0.4 * (attempt + 1))
         raise RuntimeError(str(last_error))
+
+    def should_retry_without_tls_verification(self, exc: Exception) -> bool:
+        if self.tls_mode != "auto" or self.tls_fallback_used:
+            return False
+        if isinstance(exc, ssl.SSLCertVerificationError):
+            return True
+        if isinstance(exc, urllib.error.URLError):
+            reason = getattr(exc, "reason", None)
+            return isinstance(reason, ssl.SSLCertVerificationError) or "CERTIFICATE_VERIFY_FAILED" in str(exc)
+        return "CERTIFICATE_VERIFY_FAILED" in str(exc)
 
     def get_json(self, url: str) -> dict[str, Any]:
         return json.loads(self.get_text(url, encoding="utf-8-sig"))
@@ -591,7 +634,7 @@ def parse_pool_cells(theme: str, cells: list[str], header: list[str] | None, row
         code_idx = next((idx for idx, cell in enumerate(header) if "基金代码" in cell or cell.lower() in {"code", "fund code"}), -1)
         name_idx = next((idx for idx, cell in enumerate(header) if "基金名称" in cell or cell.lower() in {"name", "fund name"}), -1)
     if code_idx < 0:
-        code_idx = next((idx for idx, cell in enumerate(cells) if re.fullmatch(r"\d{6}|\d+\.0", cell)), -1)
+        code_idx = next((idx for idx, cell in enumerate(cells) if re.fullmatch(r"\d{6}", cell)), -1)
     if name_idx < 0:
         name_idx = next(
             (
@@ -601,15 +644,15 @@ def parse_pool_cells(theme: str, cells: list[str], header: list[str] | None, row
             ),
             -1,
         )
-    code = code_string(cells[code_idx]) if 0 <= code_idx < len(cells) else ""
+    code = cells[code_idx] if 0 <= code_idx < len(cells) else ""
     name = normalize_space(cells[name_idx]) if 0 <= name_idx < len(cells) else ""
     if not code and not name:
         return None
     return PoolItem(theme=theme, input_name=name, input_code=code, row=row)
 
 
-def parse_provided_pool_text(theme: str, text: str) -> list[PoolItem]:
-    items: list[PoolItem] = []
+def parse_provided_pool_text(theme: str, text: str) -> PoolParseResult:
+    parsed = PoolParseResult()
     header: list[str] | None = None
     for row, raw_line in enumerate(text.splitlines(), start=1):
         line = normalize_space(raw_line)
@@ -622,27 +665,57 @@ def parse_provided_pool_text(theme: str, text: str) -> list[PoolItem]:
                 continue
             item = parse_pool_cells(theme, cells, header, row)
             if item:
-                items.append(item)
+                if re.fullmatch(r"\d{6}", item.input_code):
+                    parsed.items.append(item)
+                elif item.input_name:
+                    parsed.name_only.append(item)
+                else:
+                    parsed.skipped.append(f"第{row}行无法解析有效基金代码或名称")
             continue
         cleaned = re.sub(r"^\s*(?:[-*+]\s+|\d+[).、]\s*)", "", line)
         match = re.search(r"(?<!\d)(\d{6})(?!\d)", cleaned)
         if not match:
+            if cleaned:
+                parsed.name_only.append(PoolItem(theme=theme, input_name=cleaned, input_code="", row=row))
             continue
         code = code_string(match.group(1))
         name = normalize_space((cleaned[: match.start()] + " " + cleaned[match.end() :]).strip(" ,，\t-:："))
-        items.append(PoolItem(theme=theme, input_name=name, input_code=code, row=row))
-    return dedupe_input_pool_items(items)
+        parsed.items.append(PoolItem(theme=theme, input_name=name, input_code=code, row=row))
+    parsed.items = dedupe_input_pool_items(parsed.items)
+    return parsed
+
+
+def resolve_name_only_pool_items(fetcher: Fetcher, items: list[PoolItem]) -> tuple[list[PoolItem], list[str]]:
+    resolved: list[PoolItem] = []
+    warnings: list[str] = []
+    for item in items:
+        chosen, issue = choose_fund(fetcher, item.input_name, "")
+        if chosen is None:
+            warnings.append(f"第{item.row}行“{item.input_name}”未能唯一匹配基金代码，已跳过" + (f"：{issue}" if issue else ""))
+            continue
+        if issue and "多候选" in issue:
+            warnings.append(f"第{item.row}行“{item.input_name}”存在多候选，已跳过：{issue}")
+            continue
+        resolved.append(PoolItem(theme=item.theme, input_name=chosen.name, input_code=chosen.code, row=item.row))
+        if issue:
+            warnings.append(f"第{item.row}行“{item.input_name}”已匹配为 {chosen.code} {chosen.name}：{issue}")
+        else:
+            warnings.append(f"第{item.row}行“{item.input_name}”已匹配为 {chosen.code} {chosen.name}")
+    return dedupe_input_pool_items(resolved), warnings
 
 
 def dedupe_input_pool_items(items: list[PoolItem]) -> list[PoolItem]:
     seen: set[tuple[str, str]] = set()
     output: list[PoolItem] = []
     for item in items:
-        key = (code_string(item.input_code), normalize_name(item.input_name))
+        code = code_string(item.input_code)
+        if not re.fullmatch(r"\d{6}", code):
+            continue
+        key = (code, normalize_name(item.input_name))
         if key in seen:
             continue
         seen.add(key)
-        output.append(PoolItem(theme=item.theme, input_name=item.input_name, input_code=code_string(item.input_code), row=len(output) + 1))
+        output.append(PoolItem(theme=item.theme, input_name=item.input_name, input_code=code, row=len(output) + 1))
     return output
 
 
@@ -1326,6 +1399,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--update-only", action="store_true", help="Only update the local product pool, then exit. Use with --set-pool.")
     parser.add_argument("--timeout", type=float, default=8.0)
     parser.add_argument("--retries", type=int, default=2)
+    parser.add_argument(
+        "--tls-mode",
+        choices=["auto", "verify", "insecure"],
+        default="auto",
+        help="TLS handling. auto verifies first and falls back on certificate-chain failures; verify never falls back; insecure skips verification.",
+    )
+    parser.add_argument("--insecure", action="store_true", help="Compatibility alias for --tls-mode insecure.")
+    parser.add_argument("--user-agent", default=DEFAULT_USER_AGENT, help="HTTP User-Agent header for public data requests.")
+    parser.add_argument("--referer", default="", help="Optional HTTP Referer header. Empty by default.")
     parser.add_argument("--max-products", type=int, help="Smoke-test limit per theme.")
     return parser.parse_args()
 
@@ -1336,6 +1418,16 @@ def main() -> int:
     if not pool_path.exists() and not args.set_pool:
         print(f"产品池参考文件不存在：{pool_path}", file=sys.stderr)
         return 2
+    tls_mode = "insecure" if args.insecure else args.tls_mode
+    if tls_mode == "insecure":
+        print("警告：已使用 insecure TLS 模式跳过 HTTPS 证书校验，仅适用于受控网络调试。", file=sys.stderr)
+    fetcher = Fetcher(
+        timeout=args.timeout,
+        retries=args.retries,
+        tls_mode=tls_mode,
+        user_agent=args.user_agent,
+        referer=args.referer,
+    )
     if args.set_pool:
         if args.theme == "all":
             print("--set-pool 必须同时提供具体 --theme，不能使用 all", file=sys.stderr)
@@ -1345,12 +1437,18 @@ def main() -> int:
         except OSError as exc:
             print(f"无法读取用户产品清单：{exc}", file=sys.stderr)
             return 2
-        provided_items = parse_provided_pool_text(args.theme, pool_text)
+        parsed_pool = parse_provided_pool_text(args.theme, pool_text)
+        resolved_items, resolve_warnings = resolve_name_only_pool_items(fetcher, parsed_pool.name_only)
+        provided_items = dedupe_input_pool_items(parsed_pool.items + resolved_items)
         if not provided_items:
-            print("用户产品清单中未解析到有效基金代码或基金名称", file=sys.stderr)
+            print("用户产品清单中未解析到或匹配到有效 6 位基金代码", file=sys.stderr)
+            for warning in parsed_pool.skipped + resolve_warnings:
+                print(f"提示：{warning}", file=sys.stderr)
             return 2
         write_pool_reference(pool_path, args.theme, provided_items)
         print(f"已更新产品池：{args.theme}，{len(provided_items)} 只产品，文件：{pool_path}", file=sys.stderr)
+        for warning in parsed_pool.skipped + resolve_warnings:
+            print(f"提示：{warning}", file=sys.stderr)
         if args.update_only:
             return 0
     start = parse_date(args.start) if args.start else None
@@ -1360,7 +1458,6 @@ def main() -> int:
         return 2
     pools = load_pool_reference(pool_path)
     pool_sources = {theme: f"本地产品池：{pool_path.name}" for theme in pools}
-    fetcher = Fetcher(timeout=args.timeout, retries=args.retries)
     if args.theme != "all":
         if args.theme not in pools:
             discovered, source = discover_theme_pool(fetcher, args.theme)

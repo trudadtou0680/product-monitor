@@ -58,13 +58,14 @@ python3 scripts/fetch_theme_funds.py --theme CPO --period 1m --sort return --top
 `scripts/fetch_theme_funds.py` 支持：
 
 - 从 `references/product-pools.md` 读取主题产品池。
-- 使用 `--set-pool <文件路径或-> --theme <主题名>` 接收用户给出的产品清单，自动覆盖或新增 `references/product-pools.md` 中对应主题；只维护产品池时加 `--update-only`。
+- 使用 `--set-pool <文件路径或-> --theme <主题名>` 接收用户给出的产品清单，自动覆盖或新增 `references/product-pools.md` 中对应主题；写入时优先使用 6 位基金代码，名称-only 行先反查公开基金目录，能唯一匹配代码则写入，不能唯一匹配则跳过并提醒；只维护产品池时加 `--update-only`。
 - 本地不存在主题时，可通过东方财富概念板块接口匹配 CPO、PCB、先进封装等细分概念板块，并优先使用东方财富板块主题基金接口生成临时产品池；接口无返回时，再基于概念板块名称和用户主题关键词从基金目录生成临时产品池。
 - 以产品池参考文件中的基金代码为事实源；基金名称用于展示、辅助校验和代码缺失时的降级匹配。
 - 对多份额产品合并最近报告期规模。
 - 同一产品多份额只展示一行，不得让 A/C/E 等份额重复占用排名；存在 A 类份额时，收益率和最大回撤使用 A 类份额口径，规模仍合并所有份额。
 - 支持 `latest-day`、`1w`、`1m`、`3m`、`6m`、`1y`、`ytd`、`custom` 区间。
 - 支持按收益率、最大回撤、合并规模排序，并输出 Markdown、CSV 或 JSON；使用 `--detailed` 可输出单一区间收益率和最大回撤明细。
+- HTTPS 请求默认使用 `--tls-mode auto`：先校验证书，若遇到公司代理/自签证书链导致校验失败，则自动降级继续抓取并输出风险提示；安全敏感环境可用 `--tls-mode verify` 强制不降级，受控调试可用 `--tls-mode insecure` 或 `--insecure` 跳过校验。默认 User-Agent 为透明工具标识，可用 `--user-agent` 覆盖；默认不发送 Referer，确需兼容公开接口时才传 `--referer`。
 
 ## 输出原则
 
